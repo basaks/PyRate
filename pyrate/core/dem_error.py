@@ -19,6 +19,7 @@ This Python module implements the calculation of correction for residual topogra
 # pylint: disable=invalid-name, too-many-locals, too-many-arguments
 import os
 import numpy as np
+import re
 from typing import Tuple, Optional
 from os.path import join
 from pathlib import Path
@@ -271,7 +272,7 @@ def _write_dem_errors(ifg_paths: list, params: dict, preread_ifgs: dict) -> None
     gt, md, wkt = shared.get_geotiff_header_info(ifg_paths[0])
     md[ifc.DATA_TYPE] = ifc.DEM_ERROR
     dem_error = assemble_tiles(shape, params[C.TMPDIR], tiles, out_type='dem_error')
-    dem_error_file = os.path.join(params[C.DEM_ERR_DIR], 'dem_error.tif')
+    dem_error_file = os.path.join(params[C.DEM_ERROR_DIR], 'dem_error.tif')
     shared.remove_file_if_exists(dem_error_file)
     shared.write_output_geotiff(md, gt, wkt, dem_error, dem_error_file, np.nan)
 
@@ -290,12 +291,22 @@ def _write_dem_errors(ifg_paths: list, params: dict, preread_ifgs: dict) -> None
         # read dem error correction file from tmpdir
         dem_error_correction_ifg = assemble_tiles(shape, params[C.TMPDIR], tiles, out_type='dem_error_correction',
                                                   index=idx)
+
+        # Save dem error correction to GeoTIFF
+        date_pair = re.findall(r'\d{8}-\d{8}', ifg_path)
+        date_pair_str = date_pair[0]
+        dem_error_correction_file = os.path.join(params[C.DEM_ERROR_DIR], f'{date_pair_str}_dem_error_correction.tif')
+        md[ifc.DATA_TYPE] = "DEM_ERROR_CORRECTION"    
+        shared.remove_file_if_exists(dem_error_correction_file)
+        shared.write_output_geotiff(md, gt, wkt, dem_error_correction_ifg, dem_error_correction_file, np.nan)
+
         # calculate average bperp value across all tiles for the ifg
         bperp_val = np.nanmean(bperp[:, idx])
         dem_error_correction_on_disc = MultiplePaths.dem_error_path(ifg.data_path, params)
         np.save(file=dem_error_correction_on_disc, arr=dem_error_correction_ifg)
 
         # subtract DEM error from the ifg
+        log.debug(f"Applying DEM error correction to IFG: {date_pair_str}")
         ifg.phase_data -= dem_error_correction_ifg
         _save_dem_error_corrected_phase(ifg, bperp_val)
         idx += 1
